@@ -2663,15 +2663,16 @@ void gemm_cpu(int TA, int TB, int M, int N, int K, float ALPHA,
             }
         }
     }
-
+    
     is_avx();   // initialize static variable
     if (is_fma_avx2() && !TA && !TB) {
+        
         gemm_nn_fast(M, N, K, ALPHA, A, lda, B, ldb, C, ldc);
     }
     else {
         int t;
-        omp_set_num_threads(THRD_NUM);
-        // #pragma omp parallel for
+        // omp_set_num_threads(THRD_NUM);
+        #pragma omp parallel for
         for (t = 0; t < M; ++t) {
             if (!TA && !TB)
                 gemm_nn(1, N, K, ALPHA, A + t*lda, lda, B, ldb, C + t*ldc, ldc);

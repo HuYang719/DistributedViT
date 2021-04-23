@@ -2,7 +2,8 @@
 #define CONFIGURE_H
 
 /*Partitioning paramters*/
-#define OMP 1
-#define THRD_NUM 20
+#define OMP 0
+#define THRD_NUM 1
 
 #endif
+

@@ -8,7 +8,7 @@
 #define OUTPUT 0
 #define DEBUG 0
 
-layer make_layernorm_layer(int batch, int input_size, int model_dim, int train)
+layer make_layernorm_layer(int batch, int input_size, int model_dim, int train, int cut)
 {
     fprintf(stderr, "Layer Normalization Layer: batch size %d, input size %d,  model dim %d\n", batch, input_size, model_dim);
     layer layer = { (LAYER_TYPE)0 };
@@ -18,24 +18,19 @@ layer make_layernorm_layer(int batch, int input_size, int model_dim, int train)
     layer.input_size = input_size;
     layer.model_dim = model_dim;
 
-
-    layer.output = (float*)xcalloc(input_size * model_dim * batch, sizeof(float));
+    layer.cut = cut;
+    if(cut == 1) {
+       layer.output = (float*)xcalloc(batch*model_dim, sizeof(float)); 
+    }else {
+        layer.output = (float*)xcalloc(input_size * model_dim * batch, sizeof(float));
+    }
+    
     layer.delta = (float*)xcalloc(input_size * model_dim * batch, sizeof(float));
     layer.inputs = input_size;
     layer.outputs = layer.inputs;
 
-    layer.biases = (float*)xcalloc(batch*model_dim, sizeof(float));
-    layer.scales = (float*)xcalloc(batch*model_dim, sizeof(float));
-
-
-#if OMP
-omp_set_num_threads(THRD_NUM);
-#pragma omp parallel for 
-#endif  
-    for(int i = 0; i < batch; ++i){
-        for(int j = 0; j < model_dim; j++)
-        layer.scales[i*model_dim + j] = 1;
-    }
+    layer.biases = (float*)xcalloc(model_dim, sizeof(float));
+    layer.scales = (float*)xcalloc(model_dim, sizeof(float));
 
 
     
@@ -65,12 +60,31 @@ void forward_layernorm_layer(layer l, network_state state)
         model_dim, l.model_dim);
         return;
     }
+
+    printf("layer norm, biase is \n");
+    for(int i = 0; i < model_dim; i++){
+        printf("%f ", l.biases[i]);
+    }
+
+    printf("\nlayer norm, scale is \n");
+    for(int i = 0; i < model_dim; i++){
+        printf("%f ", l.scales[i]);
+    }
     // printf("layer norm input is state.input[0]=%f, state.input[1]=%f\n", state.input[0], state.input[1]);
-    calculate_mean(state.input, l.batch, l.input_size, model_dim, l.mean);
-    calculate_variance(state.input, l.batch, l.input_size, model_dim, l.mean, l.variance);
-    layer_normalization(state.input, l.output, l.mean, l.variance, l.batch, l.input_size, model_dim);
-    multiply_scales(l.output, l.scales, l.batch, l.input_size, model_dim);
-    add_biases(l.output, l.biases, l.batch, l.input_size, model_dim);  
+    if(l.cut == 1){
+        calculate_mean(state.input, l.batch, 1, model_dim, l.mean);
+        calculate_variance(state.input, l.batch, 1, model_dim, l.mean, l.variance);
+        layer_normalization(state.input, l.output, l.mean, l.variance, l.batch, 1, model_dim);
+        multiply_scales(l.output, l.scales, l.batch, 1, model_dim);
+        add_biases(l.output, l.biases, l.batch, 1, model_dim);  
+    }else{
+        calculate_mean(state.input, l.batch, l.input_size, model_dim, l.mean);
+        calculate_variance(state.input, l.batch, l.input_size, model_dim, l.mean, l.variance);
+        layer_normalization(state.input, l.output, l.mean, l.variance, l.batch, l.input_size, model_dim);
+        multiply_scales(l.output, l.scales, l.batch, l.input_size, model_dim);
+        add_biases(l.output, l.biases, l.batch, l.input_size, model_dim);  
+    }
+
     // printf("layer norm output is l.input[0]=%f, l.input[1]=%f\n", l.output[0], l.output[1]);
 
 #if OUTPUT
@@ -149,7 +163,7 @@ void  multiply_scales(float *output, float *scales, int batch, int input_size, i
         for(int ii = 0; ii < input_size; ii++) {
             for(int mi = 0; mi < model_dim; mi++) {
                 output[bi*input_size*model_dim + ii*model_dim + mi] = 
-                output[bi*input_size*model_dim + ii*model_dim + mi]*scales[bi*model_dim+mi];
+                output[bi*input_size*model_dim + ii*model_dim + mi]*scales[mi];
             }
               
         }
@@ -167,7 +181,7 @@ void  add_biases(float *output, float *biases, int batch, int input_size, int mo
         for(int ii = 0; ii < input_size; ii++) {
             for(int mi = 0; mi < model_dim; mi++) {
                 output[bi*input_size*model_dim + ii*model_dim + mi] = 
-                output[bi*input_size*model_dim + ii*model_dim + mi]+biases[bi*model_dim+mi];
+                output[bi*input_size*model_dim + ii*model_dim + mi]+biases[mi];
             }
               
         }

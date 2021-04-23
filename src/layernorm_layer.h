@@ -5,7 +5,7 @@
 #include "layer.h"
 #include "network.h"
 
-layer make_layernorm_layer(int batch, int input_size, int model_dim, int train);
+layer make_layernorm_layer(int batch, int input_size, int model_dim, int train, int cut);
 void forward_layernorm_layer(layer l, network_state state);
 
 void calculate_mean(float *input, int batch, int input_size, int model_dim, float *mean);

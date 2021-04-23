@@ -45,7 +45,7 @@ void forward_positional_embedding_layer(layer l, network_state state)
     // l.out_c = l.c = 576;
     // l.out_h = l.h = 12;
     // l.out_w = l.w = 64;
-    printf("positional_embedding, l.out_c=%d, l.c=%d, state.net.c=%d\n",  l.out_c, l.c, state.net.c);
+    // printf("positional_embedding, l.out_c=%d, l.c=%d, state.net.c=%d\n",  l.out_c, l.c, state.net.c);
     // printf("positional_embedding, state.input[0]= %f, state.input[12]=%f\n", state.input[0], state.input[12]);
     
     for(int bi = 0; bi < batch; bi++) {
@@ -53,6 +53,7 @@ void forward_positional_embedding_layer(layer l, network_state state)
             for(int di = 0; di < model_dim; di++) {
                 l.output[bi*input_size*model_dim + ii*model_dim + di] = 
                 state.input[bi*input_size*model_dim + ii*model_dim + di] + l.weights[bi*input_size*model_dim + ii*model_dim + di];
+                // printf("l.weight[%d][%d][%d] = %f\n", bi, ii, di, l.weights[bi*input_size*model_dim + ii*model_dim + di]);
             }
         }
     }

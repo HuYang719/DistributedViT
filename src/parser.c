@@ -1174,6 +1174,7 @@ layer parse_layernorm(list *options, size_params params)   // 03.29/2012 - lucyy
     int train = option_find_int(options, "train", 0);
     int model_dim = option_find_int(options, "model_dim", 1);
     int input_size = option_find_int(options, "input_size", 0);
+    int cut = option_find_int(options, "cut", 0);
 
 
     if(input_size == 0) input_size = params.inputs;
@@ -1182,7 +1183,7 @@ layer parse_layernorm(list *options, size_params params)   // 03.29/2012 - lucyy
     // model_dim = params.model_dim;
 
     // layer l = make_slice_layer(batch, w, h, c, slice_axis, slice_num, slice_pos);
-    layer l = make_layernorm_layer(batch, input_size, model_dim, train);
+    layer l = make_layernorm_layer(batch, input_size, model_dim, train, cut);
     return l;
 }
 
@@ -1203,6 +1204,7 @@ layer parse_positional_embedding(list *options, size_params params)   // 03.29/2
 layer parse_flatten(list *options, size_params params)   // 03.29/2012 - lucyyang
 {
     // int model_dim = option_find_int(options, "model_dim", 0);
+
     int model_dim = option_find_int(options, "model_dim", 1);
     int gw  =  option_find_int(options, "gw", 0);
     int gh  =  option_find_int(options, "gh", 0);
@@ -1216,6 +1218,7 @@ layer parse_flatten(list *options, size_params params)   // 03.29/2012 - lucyyan
 layer parse_mlp(list *options, size_params params)   // 03.29/2012 - lucyyang
 {
     // int model_dim = option_find_int(options, "model_dim", 0);
+
     int hidden = option_find_int(options, "output_size", 0);
     int model_dim = option_find_int(options, "model_dim", 1);
     int input_size = option_find_int(options, "input_size", 0);
@@ -1229,6 +1232,7 @@ layer parse_mlp(list *options, size_params params)   // 03.29/2012 - lucyyang
     // model_dim = params.model_dim;
 
     // layer l = make_slice_layer(batch, w, h, c, slice_axis, slice_num, slice_pos);
+
     layer l =  make_mlp_layer(batch, input_size, model_dim, hidden,  dropout,  activation);
     return l;
 }
@@ -1467,9 +1471,11 @@ network parse_network_cfg(char *filename)
 network parse_network_cfg_custom(char *filename, int batch, int time_steps)
 {
     list *sections = read_cfg(filename);
+
     node *n = sections->front;
     if(!n) error("Config file has no sections");
     network net = make_network(sections->size - 1);
+
     net.gpu_index = gpu_index;
     size_params params;
 
@@ -1480,6 +1486,7 @@ network parse_network_cfg_custom(char *filename, int batch, int time_steps)
     list *options = s->options;
     if(!is_network(s)) error("First section must be [net] or [network]");
     parse_net_options(options, &net);
+
 
 #ifdef GPU
     printf("net.optimized_memory = %d \n", net.optimized_memory);
@@ -2170,6 +2177,58 @@ void load_batchnorm_weights(layer l, FILE *fp)
 #endif
 }
 
+void load_layernorm_weights(layer l, FILE *fp)
+{
+    fread(l.biases, sizeof(float), l.model_dim, fp);
+    fread(l.scales, sizeof(float), l.model_dim, fp);
+#ifdef GPU
+    if(gpu_index >= 0){
+        push_batchnorm_layer(l);
+    }
+#endif
+}
+
+void load_multi_head_attention_weights(layer l,FILE *fp)
+{
+    fread(l.Bq, sizeof(float), l.head_num*l.key_dim, fp);
+    printf("load multi_head_attention_weights, %d\n", l.model_dim*l.head_num*l.key_dim );
+    fread(l.Wq, sizeof(float), l.model_dim*l.head_num*l.key_dim, fp);
+    fread(l.Bk, sizeof(float), l.head_num*l.key_dim, fp);
+    fread(l.Wk, sizeof(float), l.model_dim*l.head_num*l.key_dim, fp);
+    fread(l.Bv, sizeof(float), l.head_num*l.key_dim, fp);
+    fread(l.Wv, sizeof(float), l.model_dim*l.head_num*l.key_dim, fp);
+    fread(l.biases, sizeof(float), l.head_num*l.key_dim, fp);
+    fread(l.output_weight, sizeof(float), l.model_dim*l.head_num*l.key_dim, fp);
+#ifdef GPU
+    if(gpu_index >= 0){
+        push_batchnorm_layer(l);
+    }
+#endif
+}
+
+void load_mlp_weights(layer l,FILE *fp)
+{
+
+    fread(l.biases, sizeof(float), l.hidden, fp);
+    fread(l.weights, sizeof(float), l.model_dim*l.hidden, fp);
+#ifdef GPU
+    if(gpu_index >= 0){
+        push_batchnorm_layer(l);
+    }
+#endif
+}
+
+void load_positional_embedding_weights(layer l,FILE *fp)
+{
+
+    fread(l.weights, sizeof(float), l.batch*l.input_size*l.model_dim, fp);
+#ifdef GPU
+    if(gpu_index >= 0){
+        push_batchnorm_layer(l);
+    }
+#endif
+}
+
 void load_convolutional_weights_binary(layer l, FILE *fp)
 {
     fread(l.biases, sizeof(float), l.n, fp);
@@ -2316,6 +2375,15 @@ void load_weights_upto(network *net, char *filename, int cutoff)
         }
         if(l.type == BATCHNORM){
             load_batchnorm_weights(l, fp);
+        }
+        if(l.type ==  LAYERNORM_LAYER){
+            load_layernorm_weights(l, fp);
+        }if(l.type == MULTI_HEAD_ATTENTION){
+            load_multi_head_attention_weights(l,fp);
+        }if(l.type == MLP){
+            load_mlp_weights(l,fp);
+        }if(l.type == POSITIONAL_EMBEDDING){
+            load_positional_embedding_weights(l, fp);
         }
         if(l.type == CRNN){
             load_convolutional_weights(*(l.input_layer), fp);

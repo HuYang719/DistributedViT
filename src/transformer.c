@@ -1,14 +1,19 @@
 #include "network.h"
 #include "utils.h"
 #include "parser.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 void test_transformer(char *cfgfile, char *weightfile, char *filename)
 {
+
     image **alphabet = load_alphabet();
     network net = parse_network_cfg(cfgfile);
     char buff[256];
     char *input = buff;
 
+    weightfile = "/home/lucyyang/Documents/02-Darknet/darknet/weights/vit.weights";
+    printf("weightfile is %s \n", weightfile);
     if(weightfile){
         load_weights(&net, weightfile);
     }
@@ -64,6 +69,7 @@ void run_transformer(int argc, char **argv)
         fprintf(stderr, "usage: %s %s [train/test/valid] [cfg] [weights (optional)]\n", argv[0], argv[1]);
         return;
     }
+
 
     char *cfg = argv[3];
     char *weights = (argc > 4) ? argv[4] : 0;

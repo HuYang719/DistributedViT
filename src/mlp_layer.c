@@ -31,20 +31,18 @@ layer  make_mlp_layer(int batch, int input_size, int model_dim, int hidden_size,
     l.output = (float*)xcalloc(batch * l.outputs, sizeof(float));
 
     l.weights = (float*)xcalloc(model_dim*hidden_size, sizeof(float));
-    l.biases = (float*)xcalloc(l.outputs, sizeof(float));
+    l.biases = (float*)xcalloc(hidden_size, sizeof(float));
 
     l.forward = forward_mlp_layer;
 
 
 
 
-    for(i = 0; i < l.outputs; ++i){
-        l.biases[i] = 0;
-    }
-    float scale = sqrt(2.f/(input_size*model_dim));
-    for(i = 0; i < model_dim*hidden_size; ++i){
-        l.weights[i] = scale*rand_uniform(-1, 1);
-    }
+
+    // float scale = sqrt(2.f/(input_size*model_dim));
+    // for(i = 0; i < model_dim*hidden_size; ++i){
+    //     l.weights[i] = scale*rand_uniform(-1, 1);
+    // }
 
     fprintf(stderr, "mlp 1 layer                            %4d  x %4d\n", model_dim, hidden_size);
     return l;
@@ -71,10 +69,15 @@ void forward_mlp_layer(layer l, network_state state)
     }
     // printf("mlp output[%d] = %f\n", 2, l.output[2]);
     
-    for(i = 0; i < l.batch; ++i){
-        axpy_cpu(l.outputs, 1, l.biases, 1, l.output + i*l.outputs, 1);
+    for(i = 0; i < l.batch*m; ++i){
+        axpy_cpu(n, 1, l.biases, 1, l.output + i*n, 1);
     }
-    activate_array(l.output, l.outputs*l.batch, l.activation);
+    if(l.activation == SOFTMAXAC) {
+        softmax_cpu(l.output, l.hidden, l.batch,  l.input_size*l.hidden, l.input_size, l.hidden, 1, 1, l.output);
+
+    } else {
+        activate_array(l.output, l.outputs*l.batch, l.activation);
+    }
     if(l.scale > 0 && l.scale < 1) {
         float p_keep = 1-l.scale;
         scal_cpu(l.batch*l.outputs, p_keep, l.output, 1);

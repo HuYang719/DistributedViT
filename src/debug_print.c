@@ -30,11 +30,12 @@ void forward_debug_print_layer(layer l, network_state state)
             for(int d2 = 0; d2 < l.h; d2++) {
                 for(int d3 = 0; d3 < l.w; d3++) {
                     printf("layer input[%d][%d][%d][%d] = %f\n", bi, d1, d2, d3, state.input[bi*l.c*l.h*l.w + d1*l.h*l.w + d2*l.w + d3]);
+                    
                 }
             }
         }
     }
 printf("Finish.\n\n");
-    
+
 }
 
