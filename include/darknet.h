@@ -104,7 +104,7 @@ typedef struct tree {
 
 // activations.h
 typedef enum {
-    LOGISTIC, RELU, RELU6, RELIE, LINEAR, RAMP, TANH, PLSE, REVLEAKY, LEAKY, ELU, LOGGY, STAIR, HARDTAN, LHTAN, SELU, GELU, SWISH, MISH, HARD_MISH, NORM_CHAN, NORM_CHAN_SOFTMAX, NORM_CHAN_SOFTMAX_MAXVAL
+    LOGISTIC, RELU, RELU6, RELIE, LINEAR, RAMP, TANH, PLSE, REVLEAKY, LEAKY, ELU, LOGGY, STAIR, HARDTAN, LHTAN, SELU, GELU, SWISH, MISH, HARD_MISH, NORM_CHAN, NORM_CHAN_SOFTMAX, NORM_CHAN_SOFTMAX_MAXVAL, SOFTMAXAC
 }ACTIVATION;
 
 // parser.h
@@ -237,6 +237,7 @@ struct layer {
     int avgpool;
     int batch_normalize;
     int shortcut;
+    int cut;
     int batch;
     int dynamic_minibatch;
     int forced;
@@ -484,10 +485,16 @@ struct layer {
     float * Wq;
     float * Wk;
     float * Wv;
+    float * Bv;
+    float * Bq;
+    float * Bk;
     float * m;
     float * v;
     float * q;
     float * k;
+    float * kt;
+    float * qt;
+    float * vt;
     float * score;
     float * output_weight;
     float * concat_head;
