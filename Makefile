@@ -2,11 +2,12 @@ GPU=0
 CUDNN=0
 CUDNN_HALF=0
 OPENCV=0
-AVX=0
-OPENMP=1
+AVX=1
+OPENMP=0
 LIBSO=0
 ZED_CAMERA=0
 ZED_CAMERA_v2_8=0
+MPI=1
 
 # set GPU=1 and CUDNN=1 to speedup on GPU
 # set CUDNN_HALF=1 to further speedup 3 x times (Mixed-precision on Tensor Cores) GPU: Volta, Xavier, Turing and higher
@@ -70,10 +71,10 @@ endif
 ifeq ($(USE_CPP), 1)
 CC=g++
 else
-CC=gcc
+CC=mpicc
 endif
 
-CPP=g++ -std=c++11
+CPP=mpic++ -std=c++11
 NVCC=nvcc
 OPTS=-Ofast
 LDFLAGS= -lm -pthread

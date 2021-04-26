@@ -61,15 +61,15 @@ void forward_layernorm_layer(layer l, network_state state)
         return;
     }
 
-    printf("layer norm, biase is \n");
-    for(int i = 0; i < model_dim; i++){
-        printf("%f ", l.biases[i]);
-    }
+    // printf("layer norm, biase is \n");
+    // for(int i = 0; i < model_dim; i++){
+    //     printf("%f ", l.biases[i]);
+    // }
 
-    printf("\nlayer norm, scale is \n");
-    for(int i = 0; i < model_dim; i++){
-        printf("%f ", l.scales[i]);
-    }
+    // printf("\nlayer norm, scale is \n");
+    // for(int i = 0; i < model_dim; i++){
+    //     printf("%f ", l.scales[i]);
+    // }
     // printf("layer norm input is state.input[0]=%f, state.input[1]=%f\n", state.input[0], state.input[1]);
     if(l.cut == 1){
         calculate_mean(state.input, l.batch, 1, model_dim, l.mean);

@@ -12,13 +12,13 @@ void test_transformer(char *cfgfile, char *weightfile, char *filename)
     char buff[256];
     char *input = buff;
 
-    weightfile = "/home/lucyyang/Documents/02-Darknet/darknet/weights/vit.weights";
+    weightfile = "./weights/vit.weights";
     printf("weightfile is %s \n", weightfile);
     if(weightfile){
         load_weights(&net, weightfile);
     }
 
-    filename = "/home/lucyyang/Documents/02-Darknet/darknet/data/horses.jpg";
+    filename = "./img.jpg";
     printf("filename is %s\n", filename);
     
     while(1){

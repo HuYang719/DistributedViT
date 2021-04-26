@@ -12,9 +12,12 @@ void weight_multiply(int batch, int input_size, int head_num, int key_dim, int m
 void transpose_qkv(int batch, int input_size, int head_num, int key_dim, float *q, float *qt, float *k, float *kt, float *v, float *vt);
 void attention_score(int batch, int input_size, int head_num, int key_dim, float *q, float *k, float *v, float *score);
 void matmul_v(int batch, int input_size, int head_num, int key_dim, float *output, float *score, float *v);
+void transpose_output(int batch, int input_size, int head_num, int key_dim, float* output);
+
 void multi_head_output(int batch, int input_size, int head_num, int key_dim, float *output, float *concat_head, float *output_weights);
 void test_initial_value(int batch, int input_size, int head_num, int key_dim, int model_dim, float *input_data, float *Wq, float *Wk, float *Wv,
 float *q, float *k, float *v, float *score, float *output, float *output_weights);
 void test_initial_kernel(int k, int l, int m, int n, float *v, const float value, int rand, float incre);
+void output_printf(int b, int h, int q, int k, float *score, char *name);
 void test_multi_head_attention();
 #endif
