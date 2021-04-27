@@ -17,3 +17,6 @@ or test the inference time
 ```sh
 time ./darknet transformer test ./cfg/vit-test.cfg 
 ```
+#### Weight File
+
+You need to convert a pretrained weight for darknet framework or email me for this large weight file~
