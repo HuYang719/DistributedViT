@@ -3,25 +3,35 @@
 #include "parser.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <mpi.h>
+#define MPI
 
 void test_transformer(char *cfgfile, char *weightfile, char *filename)
 {
 
+    #ifdef MPI
+        // Initialize the MPI environment
+        MPI_Init(NULL, NULL);
+        int world_rank;
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    #endif
     image **alphabet = load_alphabet();
     network net = parse_network_cfg(cfgfile);
     char buff[256];
     char *input = buff;
 
-    weightfile = "./weights/vit.weights";
+    weightfile = "/home/lucyyang/Documents/02-Darknet/darknet/weights/vit.weights";
     printf("weightfile is %s \n", weightfile);
     if(weightfile){
         load_weights(&net, weightfile);
     }
 
-    filename = "./img.jpg";
+    filename = "/home/lucyyang/Documents/02-Darknet/darknet/data/horses.jpg";
     printf("filename is %s\n", filename);
-    
-    while(1){
+
+
+     while(1){
         if(filename){
             strncpy(input, filename, 256);
             printf("input is %s\n", input);
@@ -35,21 +45,23 @@ void test_transformer(char *cfgfile, char *weightfile, char *filename)
         image im = load_image_color(input,0,0);
         image sized = resize_image(im, net.h, net.w);
         float *X = sized.data;
-        printf("the size of data image is %d\n", sizeof(X));
+        // printf("the size of data image is %d\n", sizeof(X));
         clock_t time=clock();
+        double start = MPI_Wtime();
+
         network_predict(net, X);
-        printf("%s: Predicted in %f seconds.\n", input, sec(clock()-time));
-
-
-
-
+ 
+        
+        double end = MPI_Wtime();
+        printf("%s: Predicted in %f seconds., mpi_wclock is %f\n", input, sec(clock()-time), end-start);
         free_image(im);
         free_image(sized);
 
-
-
         if (filename) break;
     }
+   
+    // Finalize the MPI environment.
+    MPI_Finalize();
   
 }
 

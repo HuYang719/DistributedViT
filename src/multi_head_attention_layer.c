@@ -17,7 +17,11 @@
 #define OUTPUT 0
 #define OUTPUT_SHAPE 0
 #define TIME 1
-#define TMP 0
+#define TMP 1
+#define MPI 1
+int world_size;
+int world_rank;
+
 layer make_multi_head_attention_layer(int batch, int input_size, int head_num, int key_dim)
 {
     // projection_dim for q,v,k
@@ -40,7 +44,6 @@ layer make_multi_head_attention_layer(int batch, int input_size, int head_num, i
     int model_dim = head_num*key_dim;
     l.model_dim = model_dim;
 
-    printf("in multi_head_attention, input size is %d\n", input_size);
     l.Wq = (float*)xcalloc(model_dim*head_num*key_dim, sizeof(float));
     l.Wk = (float*)xcalloc(model_dim*head_num*key_dim, sizeof(float));
     l.Wv = (float*)xcalloc(model_dim*head_num*key_dim, sizeof(float));
@@ -66,7 +69,12 @@ layer make_multi_head_attention_layer(int batch, int input_size, int head_num, i
     // l.update = update_multi_head_attention_layer;
     l.bflops += (6*input_size*model_dim*key_dim*head_num + 2*key_dim*input_size*input_size*head_num 
     + 2*input_size*input_size*head_num + input_size*input_size*key_dim*head_num + input_size*model_dim*model_dim)/1000000000;
+      
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
+    // Get the rank of the process
+   
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     return l;
 }
 
@@ -74,7 +82,9 @@ layer make_multi_head_attention_layer(int batch, int input_size, int head_num, i
 
 void forward_multi_head_attention_layer(const layer layer, network_state state)
 {
-
+     // Get the number of processes
+         
+    // printf("Hello world from processor, rank %d out of %d processors\n", world_rank, world_size);
     float *q = layer.q;
     float *k = layer.k;
     float *v = layer.v;
@@ -94,6 +104,7 @@ void forward_multi_head_attention_layer(const layer layer, network_state state)
     float *input_data = state.input;
     int batch = layer.batch;
     int dim = layer.key_dim;
+    int key_dim = dim;
     int head_num = layer.head_num;
     int input_size = layer.inputs;
     int model_dim = state.net.model_dim;
@@ -105,76 +116,125 @@ void forward_multi_head_attention_layer(const layer layer, network_state state)
     if(model_dim != dim*head_num) {
         fprintf(stderr, "Multi_Head_Attention_Layer: model_dim %d need to equal key_dim %d * head_num %d\n", model_dim, dim, head_num);
         return;
-
     }
 
-#if TIME
-    struct timespec start, end, m1, m2, m3, m4, m5,m6, mt;
-    if( clock_gettime(CLOCK_REALTIME, &start) == -1) {perror("clock unable gettune");}
-#endif
+#ifdef MPI
+int displs[world_size], recvcounts[world_size];
+int input_size_avg =  input_size/world_size;
+int input_size_rst = input_size - input_size/world_size*(world_size-1);
+
+float *qtemp, *vtemp, *ktemp, *input_temp, *output_temp;
+qtemp = (float *)malloc(batch*input_size_rst*model_dim*sizeof(float));
+ktemp = (float *)malloc(batch*input_size_rst*model_dim*sizeof(float));
+vtemp = (float *)malloc(batch*input_size_rst*model_dim*sizeof(float));
+input_temp = (float *)malloc(batch*input_size_rst*model_dim*sizeof(float));
+output_temp = (float *)malloc(batch*input_size_rst*model_dim*sizeof(float));
+memset(qtemp, 0, batch*input_size_rst*model_dim*sizeof(float));
+memset(ktemp, 0, batch*input_size_rst*model_dim*sizeof(float));
+memset(vtemp, 0, batch*input_size_rst*model_dim*sizeof(float));
+memset(input_temp, 0, batch*input_size_rst*model_dim*sizeof(float));
+memset(output_temp, 0, batch*input_size_rst*model_dim*sizeof(float));
+
+
+for(int i = 0; i<world_size; i++){
+    if(i==0){
+        displs[i] = 0;
+        recvcounts[i] = batch*model_dim*input_size_rst;
+    }else{
+        displs[i] = displs[i-1]+recvcounts[i-1];
+        recvcounts[i] = batch*model_dim*input_size_avg;
+    }
+}
+
+
+if (world_rank == 0) {
+    MPI_Scatterv(input_data, recvcounts, displs, MPI_FLOAT, input_temp, recvcounts[world_rank], MPI_FLOAT,0,  MPI_COMM_WORLD); 
+    weight_multiply(batch, input_size_rst, head_num, key_dim, model_dim,  Wq, Wk, Wv, input_temp, qtemp, ktemp, vtemp, Bq, Bv, Bk);
+
     
+    MPI_Allgatherv(qtemp, recvcounts[world_rank], MPI_FLOAT,q, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);
+    MPI_Allgatherv(vtemp, recvcounts[world_rank], MPI_FLOAT,v, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);
+    MPI_Allgatherv(ktemp, recvcounts[world_rank], MPI_FLOAT,k, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);
 
-    // generate q, k, v
+
+    transpose_qkv(batch, input_size, head_num, key_dim, q, qt, k, kt, v, vt);
+
+    attention_score(batch, input_size, head_num, key_dim, qt, kt, score);
+
+    softmax_cpu(score, input_size, batch, head_num*input_size*input_size,head_num*input_size, input_size, 1, 1, score);
+
+    matmul_v(batch, input_size, head_num, key_dim,  output, score, v);
+
+    transpose_output(batch, input_size, head_num, key_dim,  concat_head);
+
+    MPI_Scatterv(concat_head, recvcounts, displs, MPI_FLOAT, input_temp, recvcounts[world_rank], MPI_FLOAT,0,  MPI_COMM_WORLD); 
+    multi_head_output(batch,input_size_rst, head_num, key_dim, output_temp, input_temp, output_weights);
+
+    // add bias
+    for(int i = 0; i < batch*input_size_rst; ++i){
+        axpy_cpu(model_dim, 1, layer.biases, 1, output_temp + i*model_dim, 1);
+    }
+
+    // MPI_Recv(output+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT, 1, 9,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+    MPI_Allgatherv(output_temp, recvcounts[world_rank], MPI_FLOAT,output, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);
+  
+   } else{
+
+    MPI_Scatterv(NULL, recvcounts, displs, MPI_FLOAT, input_temp, recvcounts[world_rank], MPI_FLOAT,0,  MPI_COMM_WORLD); 
+    weight_multiply(batch, input_size_avg, head_num, key_dim, model_dim,  Wq, Wk, Wv, input_temp, qtemp, ktemp, vtemp, Bq, Bv, Bk);
+
+    MPI_Allgatherv(qtemp, recvcounts[world_rank], MPI_FLOAT,q, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);
+    MPI_Allgatherv(vtemp, recvcounts[world_rank], MPI_FLOAT,v, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);
+    MPI_Allgatherv(ktemp, recvcounts[world_rank], MPI_FLOAT,k, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);
+
+ 
+    MPI_Scatterv(NULL, recvcounts, displs, MPI_FLOAT, input_temp, recvcounts[world_rank], MPI_FLOAT,0,  MPI_COMM_WORLD); 
+  
+    multi_head_output(batch, input_size_avg, head_num, key_dim, output_temp, input_temp, output_weights);
+    for(int i = 0; i < batch*input_size_avg; ++i){
+        axpy_cpu(model_dim, 1, layer.biases, 1, output_temp + i*model_dim, 1);
+    }
+    // MPI_Send(output+input_size/2*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT, 0, 9, MPI_COMM_WORLD);
+    MPI_Allgatherv(output_temp, recvcounts[world_rank], MPI_FLOAT,output, recvcounts,displs, MPI_FLOAT, MPI_COMM_WORLD);   
+   }
+
+#else
+
+ // generate q, k, v
     weight_multiply(batch, input_size, head_num, dim, model_dim,  Wq, Wk, Wv, input_data, q, k, v, Bq, Bv, Bk);
-#if TIME
-    if( clock_gettime(CLOCK_REALTIME, &m1) == -1) {perror("clock unable gettune");}
-    double time1 = (m1.tv_sec - start.tv_sec) + (double)(m1.tv_nsec - start.tv_nsec)/1e9;
-    printf("\n Weight Multiply Time is %f sec \n", time1);
-#endif   
-
     // transpose q, ks
     transpose_qkv(batch, input_size, head_num, dim, q, qt, k, kt, v, vt);
-#if TIME
-    if( clock_gettime(CLOCK_REALTIME, &m2) == -1) {perror("clock unable gettune");}
-    double time2 = (m2.tv_sec - m1.tv_sec) + (double)(m2.tv_nsec - m1.tv_nsec)/1e9;
-    printf("\n Transpose Time is %f sec \n", time2);
-#endif   
+
     // match score function
-    attention_score(batch, input_size, head_num, dim, qt, kt, v, score);
-#if TIME
-    if( clock_gettime(CLOCK_REALTIME, &m3) == -1) {perror("clock unable gettune");}
-    double time3 = (m3.tv_sec - m2.tv_sec) + (double)(m3.tv_nsec - m2.tv_nsec)/1e9;
-    printf("\n Attention Time is %f sec \n", time3);
-#endif 
-    // char name2[30] = "before softmax";
-    // output_printf(batch,  head_num, input_size, input_size, score, name2);
+    attention_score(batch, input_size, head_num, dim, qt, kt, score);
+    
 
     softmax_cpu(score, input_size, batch, head_num*input_size*input_size, head_num*input_size, input_size, 1, 1, score);
 
-    // char name3[30] = "after softmax";
-    // output_printf(batch,  head_num, input_size, input_size, score, name3);
-    // matmul with v
+
+    // // matmul with v
     matmul_v(batch, input_size, head_num, dim, concat_head, score, v);
 
-#if TIME
-    if( clock_gettime(CLOCK_REALTIME, &m4) == -1) {perror("clock unable gettune");}
-    double time4 = (m4.tv_sec - m3.tv_sec) + (double)(m4.tv_nsec - m3.tv_nsec)/1e9;
-    printf("\n Matmulv is %f sec \n", time4);
-#endif 
 
 #if OUTPUT
     char name4[30] = "concat_head";
     output_printf(batch,  head_num, input_size, dim, concat_head, name4);
 #endif
-    transpose_output(batch, input_size, head_num, dim, concat_head);
-
+    
     // MultiHead output for next sub layer
     multi_head_output(batch, input_size, head_num, dim, output, concat_head, output_weights);
 
-#if TIME
-    if( clock_gettime(CLOCK_REALTIME, &m5) == -1) {perror("clock unable gettune");}
-    double time5 = (m5.tv_sec - m4.tv_sec) + (double)(m5.tv_nsec - m4.tv_nsec)/1e9;
-    printf("\n Multi_head_output is %f sec \n", time5);
-#endif 
     // add bias
     for(int i = 0; i < batch*input_size; ++i){
         axpy_cpu(model_dim, 1, layer.biases, 1, layer.output + i*model_dim, 1);
     }
-#if TIME
-    if( clock_gettime(CLOCK_REALTIME, &m6) == -1) {perror("clock unable gettune");}
-    double time6 = (m5.tv_sec - m5.tv_sec) + (double)(m6.tv_nsec - m5.tv_nsec)/1e9;
-    printf("\n Add Biase is %f sec \n", time6);
-#endif 
+
+#endif
+
+#if DEBUG
+    char name5[30] = "output_weights";
+    output_printf(1,  head_num, dim, head_num*dim, output_weights, name5);
+#endif
     
 #if OUTPUT
     // char namei[30] = "input_data";
@@ -210,6 +270,7 @@ void forward_multi_head_attention_layer(const layer layer, network_state state)
     // free(layer.Wk);
     // free(layer.Wv);
     // free(layer.output_weight);
+
 }
 
 
@@ -223,13 +284,9 @@ void weight_multiply(int batch, int input_size, int head_num, int key_dim, int m
 int M = batch*input_size;
 int N = head_num*key_dim;
 int K = model_dim;
-
-gemm(0, 0,M, N, K, 1, input,K, qweight,N,1,q,N);
+gemm(0,0,M, N, K, 1, input,K, qweight,N,1,q,N);
 gemm(0, 0,M, N, K, 1, input,K, vweight,N,1,v,N);
 gemm(0, 0,M, N, K, 1, input,K, kweight,N,1,k,N);
-axpy_cpu(N, 1, Bq, 1, q, 1);
-axpy_cpu(N, 1, Bv, 1, v, 1);
-axpy_cpu(N, 1, Bk, 1, k, 1);
 //  for(int bi = 0; bi < batch; bi++) {
 //         // #pragma omp parallel for
 //         for(int ii = 0; ii < input_size; ii++) {
@@ -239,6 +296,9 @@ axpy_cpu(N, 1, Bk, 1, k, 1);
 //                         int tmp1 =  bi*input_size*head_num*key_dim + ii*head_num*key_dim +ki;
 //                         int tmp2 =  mi*head_num*key_dim + ki;
 //                         q[tmp1] += A_PART *qweight[tmp2];
+//                         if(ii==2)
+//                         printf("q[%d](%f) += input[%d](%f)*qweight[%d](%f)\n", tmp1, q[tmp1],bi*input_size*model_dim + ii*model_dim + mi,
+//                         A_PART , tmp2, qweight[tmp2]);
 
 //                     }       
 //             }
@@ -272,6 +332,9 @@ axpy_cpu(N, 1, Bk, 1, k, 1);
 //             }
 //         }
 //     }
+axpy_cpu(N, 1, Bq, 1, q, 1);
+axpy_cpu(N, 1, Bv, 1, v, 1);
+axpy_cpu(N, 1, Bk, 1, k, 1);
 }
 
 void transpose_qkv(int batch, int input_size, int head_num, int key_dim, float *q, float *qt, float *k, float *kt, float *v, float *vt) {
@@ -295,11 +358,10 @@ int bi, ii, hi, di;
 
 }
 
-void attention_score(int batch, int input_size, int head_num, int key_dim, float *qt, float *kt, float *v, float *score){
+void attention_score(int batch, int input_size, int head_num, int key_dim, float *qt, float *kt, float *score){
 
     // [batch, head_num, input_size, key_dim] X [b,H, keydim, input_size]
     // -> [batch, H, input_size, input_size]
-
 int i;
 int M = input_size;
 int K = key_dim;
@@ -348,7 +410,7 @@ for(i = 0; i < iter; i++) {
 
 void matmul_v(int batch, int input_size, int head_num, int key_dim, float *output, float *score, float *v) {
 
-// [B, H, S, S] X [B,H,S,W] -> [B,H,S,w]
+// [B, H, S, S] X [B,H,S,W] -> [B,H,S,W]
 int i;
 int M = input_size;
 int K = input_size;
@@ -360,36 +422,6 @@ int stride2 = input_size*key_dim;
 for(i = 0; i < batch*head_num; i++) {
     gemm(0, 0, M, N, K, 1, score+i*stride1, K, v + i*stride2, N, 1, output+ i*stride2, N);
 }
-
-// transpose_output(batch, input_size, head_num, key_dim, output);
-
-// #if OMP
-// omp_set_num_threads(THRD_NUM);
-// #pragma omp parallel for
-// #endif      
-//     for(int bi = 0; bi < batch; bi++) {
-//         for(int hi = 0; hi < head_num; hi++) {
-//                 for(int sni = 0; sni < input_size; sni++) {
-//                     for(int vni = 0; vni < input_size; vni++) {
-//                         PUT_IN_REGISTER float A_PART = score[bi*input_size*head_num*input_size + hi*input_size*input_size + sni*input_size  + vni];
-//                         for (int di = 0; di < key_dim; di++) {
-//                         output[bi*head_num*input_size*key_dim + sni*head_num*key_dim + hi*key_dim + di] += 
-//                         A_PART*v[bi*input_size*head_num*key_dim + vni*head_num*key_dim + hi*key_dim  + di];
-// #if DEBUG
-//                         printf("output[%d][%d][%d][%d] (%f) += score[%d][%d][%d][%d](%f) * v[%d][%d][%d][%d](%f)\n", bi, sni,hi, di,
-//                         output[bi*head_num*input_size*key_dim + sni*head_num*key_dim + hi*key_dim + di],bi,hi, sni, vni, score[bi*input_size*head_num*input_size + hi*input_size*input_size + sni*input_size  + vni],bi, vni, hi, di,v[bi*input_size*head_num*key_dim + vni*head_num*key_dim + hi*key_dim  + di]);
-// #endif
-//                         }
-
-//                     }
-// #if DEBUG
-//                         printf("\n\n");
-// #endif               
-//                 }
-            
-//         }
-
-//     }
 
 }
 
@@ -412,6 +444,7 @@ void transpose_output(int batch, int input_size, int head_num, int key_dim, floa
         
     }
 }
+
 
 void multi_head_output(int batch, int input_size, int head_num, int key_dim, float *output, float *concat_head, float *output_weights) {
     // output = concat_head * W^Q    // ([b, n, h x d] X [h x d, d_{model}] = [b, n, d_{model}])
@@ -458,169 +491,100 @@ void update_multi_head_attention_layer() {}
 
 void test_multi_head_attention(){
 
-//     MPI_Init(NULL, NULL);
-//     int world_size,world_rank;
-//     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-//     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    int batch = 1;
+    int input_size = 577;
+    int head_num = 12;
+    int key_dim = 64;
+    int model_dim = 768;
+#if TIME
+    struct timespec start, end, m1, m2, m3, m4, m5,m6, mt;
+    if( clock_gettime(CLOCK_REALTIME, &start) == -1) {perror("clock unable gettune");}
+#endif
 
-//     int batch = 1;
-//     int input_size = 557;
-//     int head_num = 12;
-//     int key_dim = 64;
-//     int model_dim = 768;
-
-//     float *input_data, *Wq,*Wk, *Wv, *q, *qt, *k, *kt, *v, *vt, *Bv, *Bq, *Bk, *score, *output, *output_weights, *final_result;
-//     input_data = (float*) malloc(batch*input_size*model_dim*sizeof(float));
-//     Wq =  (float*) malloc(model_dim*head_num*key_dim*sizeof(float));
-//     Wk =  (float*) malloc(model_dim*head_num*key_dim*sizeof(float));
-//     Wv =  (float*) malloc(model_dim*head_num*key_dim*sizeof(float));
-//     q = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
-//     qt = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float)); //qt [B, H, input_size, key_dim]
-//     k = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
-//     kt = (float*) malloc(batch*head_num*key_dim*input_size*sizeof(float)); //kt [B,H, key_dim, input_size]
-//     v = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
-//     vt = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float)); //kt [B,H, input_size, key_dim]
-//     Bq = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float));
-//     Bv = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float));
-//     Bk = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float));
-//     score = (float*) malloc(batch*head_num*input_size*input_size*sizeof(float));
-//     output = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
-//     output_weights = (float*) malloc(head_num*key_dim*head_num*key_dim*sizeof(float));
-//     final_result = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
+    float *input_data, *Wq,*Wk, *Wv, *q, *qt, *k, *kt, *v, *vt, *Bv, *Bq, *Bk, *score, *output, *output_weights, *final_result;
+    input_data = (float*) malloc(batch*input_size*model_dim*sizeof(float));
+    Wq =  (float*) malloc(model_dim*head_num*key_dim*sizeof(float));
+    Wk =  (float*) malloc(model_dim*head_num*key_dim*sizeof(float));
+    Wv =  (float*) malloc(model_dim*head_num*key_dim*sizeof(float));
+    q = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
+    qt = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float)); //qt [B, H, input_size, key_dim]
+    k = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
+    kt = (float*) malloc(batch*head_num*key_dim*input_size*sizeof(float)); //kt [B,H, key_dim, input_size]
+    v = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
+    vt = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float)); //kt [B,H, input_size, key_dim]
+    Bq = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float));
+    Bv = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float));
+    Bk = (float*) malloc(batch*head_num*input_size*key_dim*sizeof(float));
+    score = (float*) malloc(batch*head_num*input_size*input_size*sizeof(float));
+    output = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
+    output_weights = (float*) malloc(head_num*key_dim*head_num*key_dim*sizeof(float));
+    final_result = (float*) malloc(batch*input_size*head_num*key_dim*sizeof(float));
      
+    // initial value for input_data, Weights(Wq, Wk, Wv, output_weight);
+    test_initial_value(batch, input_size, head_num, key_dim,model_dim, input_data, Wq, Wk, Wv, q,k, v, score, output, output_weights);
+    // printf("after initial, Wq[1][0][0]=%f\n",Wq[1*key_dim*head_num]);
+    // printf("The size is : Wq = %ld, q = %ld, score = %ld, output = %ld, output_weights = %ld, final_result = %ld\n", 
+    // (int)sizeof(Wq)/sizeof(Wq[12]), sizeof(*q), sizeof(*score), sizeof(*output), sizeof(*output_weights), sizeof(*final_result));
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &m1) == -1) {perror("clock unable gettune");}
+    double time1 = (m1.tv_sec - start.tv_sec) + (double)(m1.tv_nsec - start.tv_nsec)/1e9;
+    printf("\n Allocation Time is %f sec \n", time1);
+#endif
+    weight_multiply(batch, input_size, head_num, key_dim, model_dim,  Wq, Wk, Wv, input_data, q, k, v, Bq, Bv, Bk);
 
-//     if (world_rank == 1) {
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &m2) == -1) {perror("clock unable gettune");}
+    double time2 = (m2.tv_sec - m1.tv_sec) + (double)(m2.tv_nsec - m1.tv_nsec)/1e9;
+    printf("\n Weight Multiply Time is %f sec \n", time2);
+#endif
 
-//         test_initial_value(batch, input_size, head_num, key_dim,model_dim, input_data, Wq, Wk, Wv, q,k, v, score, output, output_weights);
-
-//         weight_multiply(batch, input_size - input_size/2, head_num, key_dim, model_dim,  Wq, Wk, Wv, input_data, q+(input_size/2)*model_dim, k+(input_size/2)*model_dim, v+(input_size/2)*model_dim, Bq, Bv, Bk);
-
-//         MPI_Sendrecv(q+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim,MPI_FLOAT,0, 2,
-//                 q, input_size/2*model_dim, MPI_FLOAT,
-//                 0, 1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-//         MPI_Sendrecv(v+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim,MPI_FLOAT,0, 4,
-//                 v, input_size/2*model_dim, MPI_FLOAT,
-//                 0, 3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-//         MPI_Sendrecv(k+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim,MPI_FLOAT,0, 6,
-//                 k, input_size/2*model_dim, MPI_FLOAT,
-//                 0, 5,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-//         int head_num_2 = head_num-head_num/2;
-//         transpose_qkv(batch, input_size, head_num, key_dim, q, qt, k, kt, v, vt);
-//         attention_score(batch, input_size, head_num_2, key_dim, qt+head_num/2*input_size*key_dim, kt+head_num/2*input_size*key_dim, NULL, score+head_num/2*input_size*input_size);
-//         softmax_cpu(score, input_size, batch, head_num_2*input_size*input_size, head_num_2*input_size, input_size, 1, 1, score+head_num/2*input_size*input_size);
-//         matmul_v(batch, input_size, head_num_2, key_dim, output+head_num/2*input_size*key_dim, score+head_num/2*input_size*input_size, v);
-
-//         MPI_Sendrecv(output+(head_num/2)*input_size*key_dim, (head_num - head_num/2)*input_size*key_dim,MPI_FLOAT,0, 8,
-//                 output, head_num/2*input_size*key_dim, MPI_FLOAT,
-//                 0, 7,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-//         transpose_output(batch, input_size, head_num, key_dim, output);
-//         multi_head_output(batch,input_size-input_size/2, head_num, key_dim, final_result+input_size/2*model_dim, output+input_size/2*model_dim, output_weights);
-//         MPI_Send(final_result+input_size/2*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT, 0, 9, MPI_COMM_WORLD);
-        
-//         // MPI_Finalize();
-//    } else if (world_rank == 0) {
-//     // number = -1;
-//     // MPI_Send(&number, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
-
-// #if TIME
-//     struct timespec start, end, m1, m2, m3, m4, m5,m6, mt;
-//     if( clock_gettime(CLOCK_REALTIME, &start) == -1) {perror("clock unable gettune");}
-// #endif
-
-//     // initial value for input_data, Weights(Wq, Wk, Wv, output_weight);
-//     test_initial_value(batch, input_size, head_num, key_dim,model_dim, input_data, Wq, Wk, Wv, q,k, v, score, output, output_weights);
-//     // printf("after initial, Wq[1][0][0]=%f\n",Wq[1*key_dim*head_num]);
-//     // printf("The size is : Wq = %ld, q = %ld, score = %ld, output = %ld, output_weights = %ld, final_result = %ld\n", 
-//     // (int)sizeof(Wq)/sizeof(Wq[12]), sizeof(*q), sizeof(*score), sizeof(*output), sizeof(*output_weights), sizeof(*final_result));
-
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &m1) == -1) {perror("clock unable gettune");}
-//     double time1 = (m1.tv_sec - start.tv_sec) + (double)(m1.tv_nsec - start.tv_nsec)/1e9;
-//     printf("\n Allocation Time is %f sec \n", time1);
-// #endif
-//     weight_multiply(batch, input_size - input_size/2, head_num, key_dim, model_dim,  Wq, Wk, Wv, input_data, q, k, v, Bq, Bv, Bk);
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &m2) == -1) {perror("clock unable gettune");}
-//     double time2 = (m2.tv_sec - m1.tv_sec) + (double)(m2.tv_nsec - m1.tv_nsec)/1e9;
-//     printf("\n Weight Multiply Time is %f sec \n", time2);
-// #endif
-
-//     // MPI_Recv(q+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT, 1, 1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-//     // MPI_Recv(k+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT, 1, 2, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-//     // MPI_Recv(v+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT, 1, 3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-//     MPI_Sendrecv(q, input_size/2*model_dim,MPI_FLOAT,1, 1,
-//                 q+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT,
-//                 1, 2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-//     MPI_Sendrecv(v, input_size/2*model_dim,MPI_FLOAT,1, 3,
-//                 v+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT,
-//                 1, 4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-//     MPI_Sendrecv(k, input_size/2*model_dim,MPI_FLOAT,1, 5,
-//                 k+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT,
-//                 1, 6,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-
-// transpose_qkv(batch, input_size, head_num, key_dim, q, qt, k, kt, v, vt);
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &mt) == -1) {perror("clock unable gettune");}
-//     double timet = (mt.tv_sec - m2.tv_sec) + (double)(mt.tv_nsec - m2.tv_nsec)/1e9;
-//     printf("\n Transpose Time is %f sec \n", timet);
-// #endif
-//     char nameq[30] = "result q";
-//     output_printf(batch, input_size, head_num, key_dim, q, nameq);
-//     char namek[30] = "result k";
-//     output_printf(batch, input_size, head_num, key_dim, k, namek);
-//     char namev[30] = "result v";
-//     output_printf(batch, input_size, head_num, key_dim, v, namev);
-//     attention_score(batch, input_size, head_num/2, key_dim, qt, kt, NULL, score);
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &m3) == -1) {perror("clock unable gettune");}
-//     double time3 = (m3.tv_sec - m2.tv_sec) + (double)(m3.tv_nsec - m2.tv_nsec)/1e9;
-//     printf("\n Attention Score Time is %f sec \n", time3);
-// #endif
-//     // char name2[30] = "score";
-//     // output_printf(batch,  head_num, input_size, input_size, score, name2);
-//     softmax_cpu(score, input_size, batch, head_num/2*input_size*input_size, head_num/2*input_size, input_size, 1, 1, score);
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &m4) == -1) {perror("clock unable gettune");}
-//     double time4 = (m4.tv_sec - m3.tv_sec) + (double)(m4.tv_nsec - m3.tv_nsec)/1e9;
-//     printf("\n Softmax Score Time is %f sec \n", time4);
-// #endif
+transpose_qkv(batch, input_size, head_num, key_dim, q, qt, k, kt, v, vt);
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &mt) == -1) {perror("clock unable gettune");}
+    double timet = (mt.tv_sec - m2.tv_sec) + (double)(mt.tv_nsec - m2.tv_nsec)/1e9;
+    printf("\n Transpose Time is %f sec \n", timet);
+#endif
+    char nameq[30] = "result q";
+    output_printf(batch, input_size, head_num, key_dim, q, nameq);
+    char namek[30] = "result k";
+    output_printf(batch, input_size, head_num, key_dim, k, namek);
+    char namev[30] = "result v";
+    output_printf(batch, input_size, head_num, key_dim, v, namev);
+    attention_score(batch, input_size, head_num, key_dim, qt, kt, score);
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &m3) == -1) {perror("clock unable gettune");}
+    double time3 = (m3.tv_sec - m2.tv_sec) + (double)(m3.tv_nsec - m2.tv_nsec)/1e9;
+    printf("\n Attention Score Time is %f sec \n", time3);
+#endif
+    // char name2[30] = "score";
+    // output_printf(batch,  head_num, input_size, input_size, score, name2);
+    softmax_cpu(score, input_size, batch, head_num*input_size*input_size, head_num*input_size, input_size, 1, 1, score);
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &m4) == -1) {perror("clock unable gettune");}
+    double time4 = (m4.tv_sec - m3.tv_sec) + (double)(m4.tv_nsec - m3.tv_nsec)/1e9;
+    printf("\n Softmax Score Time is %f sec \n", time4);
+#endif
     
 
-//     matmul_v(batch, input_size, head_num/2, key_dim, output, score, v);
-//     MPI_Sendrecv(output,  head_num/2*input_size*key_dim,MPI_FLOAT,1, 7,
-//                 output+(head_num/2)*input_size*key_dim,(head_num - head_num/2)*input_size*key_dim, MPI_FLOAT,
-//                 1, 8,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-//     transpose_output(batch, input_size, head_num, key_dim, output);
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &m5) == -1) {perror("clock unable gettune");}
-//     double time5 = (m5.tv_sec - m4.tv_sec) + (double)(m5.tv_nsec - m4.tv_nsec)/1e9;
-//     printf("\n Matmul_v Time is %f sec \n", time5);
-// #endif
-//     multi_head_output(batch, input_size/2, head_num, key_dim, final_result, output, output_weights);
-
-//     MPI_Recv(final_result+(input_size/2)*model_dim, (input_size - input_size/2)*model_dim, MPI_FLOAT, 1, 9,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-  
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &m6) == -1) {perror("clock unable gettune");}
-//     double time6 = (m6.tv_sec - m5.tv_sec) + (double)(m6.tv_nsec - m5.tv_nsec)/1e9;
-//     printf("\n Multi_head_output Time is %f sec \n", time6);
-// #endif
-// #if TIME
-//     if( clock_gettime(CLOCK_REALTIME, &end) == -1) {perror("clock unable gettune");}
-//     double time = (end.tv_sec - start.tv_sec) + (double)(end.tv_nsec - start.tv_nsec)/1e9;
-//     printf("\n Attention Time is %f sec \n", time);
-// #endif
-//     char name[30] = "final_result";
-//     output_printf(batch, input_size, 1, head_num*key_dim, final_result, name);
-//     }
-
-    
-//     // Finalize the MPI environment.
-//     MPI_Finalize();
+    matmul_v(batch, input_size, head_num, key_dim, output, score, v);
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &m5) == -1) {perror("clock unable gettune");}
+    double time5 = (m5.tv_sec - m4.tv_sec) + (double)(m5.tv_nsec - m4.tv_nsec)/1e9;
+    printf("\n Matmul_v Time is %f sec \n", time5);
+#endif
+    multi_head_output(batch, input_size, head_num, key_dim, final_result, output, output_weights);
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &m6) == -1) {perror("clock unable gettune");}
+    double time6 = (m6.tv_sec - m5.tv_sec) + (double)(m6.tv_nsec - m5.tv_nsec)/1e9;
+    printf("\n Multi_head_output Time is %f sec \n", time6);
+#endif
+#if TIME
+    if( clock_gettime(CLOCK_REALTIME, &end) == -1) {perror("clock unable gettune");}
+    double time = (end.tv_sec - start.tv_sec) + (double)(end.tv_nsec - start.tv_nsec)/1e9;
+    printf("\n Attention Time is %f sec \n", time);
+#endif
+    char name[30] = "final_result";
+    output_printf(batch, input_size, 1, head_num*key_dim, final_result, name);
 }
 
 void test_initial_kernel(int k, int l, int m, int n, float *v, const float value, int rand, float incre) {
