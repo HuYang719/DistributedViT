@@ -20,7 +20,7 @@ time ./darknet transformer test ./cfg/vit-test.cfg
 or with MPI Command:
 
 ```sh
-mpirun -np 2 ../darknet transformer test ./cfg/vit-test.cfg
+mpirun -np 2 ./darknet transformer test ./cfg/vit-test.cfg
 ```
 #### Weight File
 

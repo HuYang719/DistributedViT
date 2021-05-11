@@ -18,4 +18,5 @@ void test_initial_value(int batch, int input_size, int head_num, int key_dim, in
 float *q, float *k, float *v, float *score, float *output, float *output_weights);
 void test_initial_kernel(int k, int l, int m, int n, float *v, const float value, int rand, float incre);
 void test_multi_head_attention();
+void output_printf(int b, int h, int q, int k, float *score, char *name);
 #endif
