@@ -27,14 +27,14 @@ void test_transformer(char *cfgfile, char *weightfile, char *filename)
         load_weights(&net, weightfile);
     }
 
-    filename = "/home/lucyyang/Documents/02-Darknet/darknet/data/horses.jpg";
-    printf("filename is %s\n", filename);
+    filename = "/home/lucyyang/Documents/02-Darknet/darknet/img.jpg";
+    // printf("filename is %s\n", filename);
 
 
      while(1){
         if(filename){
             strncpy(input, filename, 256);
-            printf("input is %s\n", input);
+            // printf("input is %s\n", input);
         } else {
             printf("Enter Image Path: ");
             fflush(stdout);
@@ -45,7 +45,6 @@ void test_transformer(char *cfgfile, char *weightfile, char *filename)
         image im = load_image_color(input,0,0);
         image sized = resize_image(im, net.h, net.w);
         float *X = sized.data;
-        // printf("the size of data image is %d\n", sizeof(X));
         clock_t time=clock();
         double start = MPI_Wtime();
 
@@ -53,7 +52,7 @@ void test_transformer(char *cfgfile, char *weightfile, char *filename)
  
         
         double end = MPI_Wtime();
-        printf("%s: Predicted in %f seconds., mpi_wclock is %f\n", input, sec(clock()-time), end-start);
+
         free_image(im);
         free_image(sized);
 
