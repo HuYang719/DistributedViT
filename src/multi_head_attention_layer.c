@@ -18,7 +18,7 @@
 #define OUTPUT_SHAPE 0
 #define TIME 1
 #define TMP 1
-#define MPI 1
+// #define MPI 1
 int world_size;
 int world_rank;
 
@@ -62,6 +62,7 @@ layer make_multi_head_attention_layer(int batch, int input_size, int head_num, i
     l.biases = (float*)xcalloc(head_num * key_dim, sizeof(float));
     l.concat_head = (float*)xcalloc(batch * input_size * head_num * key_dim, sizeof(float));
     l.output = (float*)xcalloc(batch * input_size * head_num * key_dim, sizeof(float));
+    l.output_t = (float*)xcalloc(batch * input_size * head_num * key_dim, sizeof(float));
     // l.finaloutput = (float*)xcalloc(batch * input_size * head_num * key_dim, sizeof(float))
 
     l.forward = forward_multi_head_attention_layer;
@@ -163,7 +164,7 @@ if (world_rank == 0) {
 
     softmax_cpu(score, input_size, batch, head_num*input_size*input_size,head_num*input_size, input_size, 1, 1, score);
 
-    matmul_v(batch, input_size, head_num, key_dim,  output, score, v);
+    matmul_v(batch, input_size, head_num, key_dim,  output, score, vt);
 
     transpose_output(batch, input_size, head_num, key_dim,  concat_head);
 
@@ -207,22 +208,22 @@ if (world_rank == 0) {
 
     // match score function
     attention_score(batch, input_size, head_num, dim, qt, kt, score);
+
+    // printf("--------\n");
+    // printf("score is \n");
+    // for(int i = 0; i < batch * head_num * input_size *input_size; i++){
+    //     printf("%f ", score[i]);
+    // }
     
 
     softmax_cpu(score, input_size, batch, head_num*input_size*input_size, head_num*input_size, input_size, 1, 1, score);
-
-
     // // matmul with v
-    matmul_v(batch, input_size, head_num, dim, concat_head, score, v);
+    matmul_v(batch, input_size, head_num, dim, concat_head, score, vt);
 
-
-#if OUTPUT
-    char name4[30] = "concat_head";
-    output_printf(batch,  head_num, input_size, dim, concat_head, name4);
-#endif
+    transpose_output(batch, input_size, head_num, key_dim,  concat_head, layer.output_t);
     
     // MultiHead output for next sub layer
-    multi_head_output(batch, input_size, head_num, dim, output, concat_head, output_weights);
+    multi_head_output(batch, input_size, head_num, dim, output, layer.output_t, output_weights);
 
     // add bias
     for(int i = 0; i < batch*input_size; ++i){
@@ -235,7 +236,7 @@ if (world_rank == 0) {
     char name5[30] = "output_weights";
     output_printf(1,  head_num, dim, head_num*dim, output_weights, name5);
 #endif
-    
+
 #if OUTPUT
     // char namei[30] = "input_data";
     // output_printf(batch, input_size, 1, model_dim, input_data, namei);
@@ -263,6 +264,16 @@ if (world_rank == 0) {
     char name[30] = "attention output";
     output_printf(batch, input_size, 1, head_num*dim, output, name);
 #endif
+    // printf("biase  is \n");
+    // for(int i = 0; i < head_num*key_dim; i++){
+    //     printf("%f ", Bq[i]);
+    // }
+
+
+    // printf("attention layer result :\n");
+    // for(int i = 0; i < model_dim*head_num*key_dim; i++){
+    //     printf("%f ", Wq[i]);
+    // }
      
     
 
@@ -284,9 +295,17 @@ void weight_multiply(int batch, int input_size, int head_num, int key_dim, int m
 int M = batch*input_size;
 int N = head_num*key_dim;
 int K = model_dim;
-gemm(0,0,M, N, K, 1, input,K, qweight,N,1,q,N);
-gemm(0, 0,M, N, K, 1, input,K, vweight,N,1,v,N);
-gemm(0, 0,M, N, K, 1, input,K, kweight,N,1,k,N);
+gemm(0, 1,M, N, K, 1, input,K, qweight,N,1,q,N);
+gemm(0, 1,M, N, K, 1, input,K, vweight,N,1,v,N);
+gemm(0, 1,M, N, K, 1, input,K, kweight,N,1,k,N);
+
+for(int i = 0; i < M; i++){
+    axpy_cpu(N, 1, Bq, 1, q+i*N, 1);
+    axpy_cpu(N, 1, Bv, 1, v+i*N, 1);
+    axpy_cpu(N, 1, Bk, 1, k+i*N, 1);
+}
+
+
 //  for(int bi = 0; bi < batch; bi++) {
 //         // #pragma omp parallel for
 //         for(int ii = 0; ii < input_size; ii++) {
@@ -296,14 +315,20 @@ gemm(0, 0,M, N, K, 1, input,K, kweight,N,1,k,N);
 //                         int tmp1 =  bi*input_size*head_num*key_dim + ii*head_num*key_dim +ki;
 //                         int tmp2 =  mi*head_num*key_dim + ki;
 //                         q[tmp1] += A_PART *qweight[tmp2];
-//                         if(ii==2)
-//                         printf("q[%d](%f) += input[%d](%f)*qweight[%d](%f)\n", tmp1, q[tmp1],bi*input_size*model_dim + ii*model_dim + mi,
-//                         A_PART , tmp2, qweight[tmp2]);
+//                         // if(ii==2)
+//                         // printf("q[%d](%f) += input[%d](%f)*qweight[%d](%f)\n", tmp1, q[tmp1],bi*input_size*model_dim + ii*model_dim + mi,
+//                         // A_PART , tmp2, qweight[tmp2]);
 
 //                     }       
 //             }
 //         }
 //     }
+// axpy_cpu(N, 1, Bq, 1, q, 1);
+
+// printf(" Manual result is \n");
+// for(int i = 0; i < M*N; i++){
+//     printf("%f ", q[i]);
+// }
 
 //  for(int bi = 0; bi < batch; bi++) {
 //         // #pragma omp parallel for
@@ -332,9 +357,7 @@ gemm(0, 0,M, N, K, 1, input,K, kweight,N,1,k,N);
 //             }
 //         }
 //     }
-axpy_cpu(N, 1, Bq, 1, q, 1);
-axpy_cpu(N, 1, Bv, 1, v, 1);
-axpy_cpu(N, 1, Bk, 1, k, 1);
+
 }
 
 void transpose_qkv(int batch, int input_size, int head_num, int key_dim, float *q, float *qt, float *k, float *kt, float *v, float *vt) {
@@ -423,21 +446,26 @@ for(i = 0; i < batch*head_num; i++) {
     gemm(0, 0, M, N, K, 1, score+i*stride1, K, v + i*stride2, N, 1, output+ i*stride2, N);
 }
 
+
 }
 
-void transpose_output(int batch, int input_size, int head_num, int key_dim, float* output){
+void transpose_output(int batch, int input_size, int head_num, int key_dim, float* input, float* output){
     int bi, ii, hi, di;
+    // output = float[batch][head_num][input_size][key_dim]
+    // i ,j , k, l => i* input_size*head_num*key_dim + j*input_size*key_dim + k*key_dim + l
+
+    // i,(k , j), l => i* input_size*head_num*key_dim + k*head_num*key_dim + j*key_dim + l
+
+    // assert input_size = 
 
     for(bi = 0; bi < batch; bi++) {
             // #pragma omp parallel for
-            for(ii = 0; ii < input_size; ii++) {
-                for(hi = 0; hi < head_num; hi++) {
+            for(ii = 0; ii < head_num; ii++) {
+                for(hi = 0; hi < input_size; hi++) {
                     for(di = 0; di < key_dim; di++) {
-                        if(ii > hi){
-                            output[bi*input_size*head_num*key_dim + ii*head_num*key_dim + hi*key_dim +di] =
-                        output[bi*head_num*input_size*key_dim + hi*input_size*key_dim + ii*key_dim + di];
-
-                        }
+                        output[bi*input_size*head_num*key_dim + hi*head_num*key_dim + ii*key_dim +di] =
+                        input[bi*head_num*input_size*key_dim + ii*input_size*key_dim + hi*key_dim + di];
+                        
                     }
                 }
             }
@@ -452,8 +480,7 @@ int M = batch*input_size;
 int K = head_num*key_dim;
 int N = head_num*key_dim;
 
-gemm(0, 0, M, N, K, 1, concat_head, K, output_weights , N, 1, output , N);
-
+gemm(0, 1, M, N, K, 1, concat_head, K, output_weights , N, 1, output , N);
 
 // int bi, ni, mi, hi;
 // #if OMP

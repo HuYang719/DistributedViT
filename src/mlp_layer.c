@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <mpi.h>
-#define MPI 1
+// #define MPI 1
 
 int world_size, world_rank;
 
@@ -32,7 +32,7 @@ layer  make_mlp_layer(int batch, int input_size, int model_dim, int hidden_size,
 
     l.output = (float*)xcalloc(batch * l.outputs, sizeof(float));
 
-    l.weights = (float*)xcalloc(model_dim*hidden_size, sizeof(float));
+    l.weights = (float*)xcalloc(hidden_size*model_dim, sizeof(float));
     l.biases = (float*)xcalloc(hidden_size, sizeof(float));
 
     l.forward = forward_mlp_layer;
@@ -45,11 +45,11 @@ layer  make_mlp_layer(int batch, int input_size, int model_dim, int hidden_size,
     // for(i = 0; i < model_dim*hidden_size; ++i){
     //     l.weights[i] = scale*rand_uniform(-1, 1);
     // }
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    // MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-    // Get the rank of the process
+    // // Get the rank of the process
    
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    // MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     fprintf(stderr, "mlp 1 layer                            %4d  x %4d\n", model_dim, hidden_size);
     return l;
 }
@@ -123,7 +123,7 @@ MPI_Allgatherv(output_temp, recvcounts_o[world_rank], MPI_FLOAT,l.output, recvco
 }
 
 #else
-
+//[m, k] *[k, n] -> [m, n]
     int m = l.input_size;
     int k = l.model_dim;
     int n = l.hidden;
@@ -132,25 +132,47 @@ MPI_Allgatherv(output_temp, recvcounts_o[world_rank], MPI_FLOAT,l.output, recvco
     float *c = l.output;
 
     for(i = 0; i < l.batch; i++) {
-        gemm(0,0,m,n,k,1,a,k,b,n,1,c + i*l.outputs,n);
+        gemm(0,1,m,n,k,1,a,k,b,k,1,c + i*l.outputs,n);
     }
- #endif   
+ 
 
     // printf("mlp output[%d] = %f\n", 2, l.output[2]);
-    
     for(i = 0; i < l.batch*m; ++i){
         axpy_cpu(n, 1, l.biases, 1, l.output + i*n, 1);
     }
+
+
+    // if(l.scale > 0 && l.scale < 1) {
+    //     float p_keep = 1-l.scale;
+    //     scal_cpu(l.batch*l.outputs, p_keep, l.output, 1);
+    // }
+
     if(l.activation == SOFTMAXAC) {
         softmax_cpu(l.output, l.hidden, l.batch,  l.input_size*l.hidden, l.input_size, l.hidden, 1, 1, l.output);
 
     } else {
         activate_array(l.output, l.outputs*l.batch, l.activation);
     }
-    if(l.scale > 0 && l.scale < 1) {
-        float p_keep = 1-l.scale;
-        scal_cpu(l.batch*l.outputs, p_keep, l.output, 1);
-    }
+
+    // printf(" output shaoe is %d x %d\n", l.input_size, l.hidden);
+    //     int s = 0;
+    //     if(state.index == 88){
+    //         for(int i = 0; i < l.input_size; i++){
+    //         printf("[");
+    //         for(int j = 0; j < l.hidden; j++){
+    //                 printf("%f ", l.output[i*l.hidden+j]);
+    //                 s++;
+    //                 if(s == 6){
+    //                     printf("\n");
+    //                     s=0;
+    //                 }    
+    //         }
+    //         printf("]\n");
+    //         s=0;
+    //     }
+
+    //     }
+ #endif  
     free(l.weights);
     free(l.biases);
 }

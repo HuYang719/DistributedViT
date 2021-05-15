@@ -169,10 +169,16 @@ void forward_shortcut_layer(const layer l, network_state state)
             // printf("size = %d, l.output[%d](%f) = state.input[%d](%f) + state.net.layers[%d].output[%d](%f)\n", 
             // size, si,l.output[si], si,state.input[si], l.index, si, state.net.layers[l.index].output[si]);
         }
-         
+
             
     }else {
-        shortcut_multilayer_cpu(l.outputs * l.batch, l.outputs, l.batch, l.n, l.input_sizes, l.layers_output, l.output, state.input, l.weights, l.nweights, l.weights_normalization);
+    //    shortcut_multilayer_cpu(l.outputs * l.batch, l.outputs, l.batch, l.n, l.input_sizes, l.layers_output, l.output, state.input, l.weights, l.nweights, l.weights_normalization);
+
+          for(int si = 0; si < l.c*l.w*l.h; ++si){
+            l.output[si] = state.input[si] + state.net.layers[l.index].output[si];
+          
+        }
+   
     }
 
     //copy_cpu(l.outputs*l.batch, state.input, 1, l.output, 1);

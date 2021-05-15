@@ -2220,8 +2220,8 @@ void load_mlp_weights(layer l,FILE *fp)
 
 void load_positional_embedding_weights(layer l,FILE *fp)
 {
-
     fread(l.weights, sizeof(float), l.batch*l.input_size*l.model_dim, fp);
+    fread(l.class_token, sizeof(float), 1*1*l.model_dim, fp);
 #ifdef GPU
     if(gpu_index >= 0){
         push_batchnorm_layer(l);

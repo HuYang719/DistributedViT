@@ -21,20 +21,20 @@ void test_transformer(char *cfgfile, char *weightfile, char *filename)
     char buff[256];
     char *input = buff;
 
-    weightfile = "/home/lucyyang/Documents/02-Darknet/darknet/weights/vit.weights";
+    weightfile = "/Users/lucyyang/Documents/00-PhD/00-Research/03-Projects/05-DistributedViT/DistributedViT/weights/vit2.weights";
     printf("weightfile is %s \n", weightfile);
     if(weightfile){
         load_weights(&net, weightfile);
     }
 
-    filename = "/home/lucyyang/Documents/02-Darknet/darknet/img.jpg";
+    filename = "/Users/lucyyang/Documents/00-PhD/00-Research/03-Projects/05-DistributedViT/DistributedViT/img.png";
     // printf("filename is %s\n", filename);
 
 
      while(1){
         if(filename){
             strncpy(input, filename, 256);
-            // printf("input is %s\n", input);
+            printf("input is %s\n", input);
         } else {
             printf("Enter Image Path: ");
             fflush(stdout);
@@ -43,7 +43,25 @@ void test_transformer(char *cfgfile, char *weightfile, char *filename)
             strtok(input, "\n");
         }
         image im = load_image_color(input,0,0);
+
         image sized = resize_image(im, net.h, net.w);
+        // for(int c = 0; c < sized.c; c++){
+        //     for(int h = 0; h < sized.h; h++){
+        //         for(int w = 0; w < sized.w; w++){
+        //             //printf("%.4f ", sized.data[c*im.h*im.w + h*im.w + w]);
+        //             sized.data[c*sized.h*sized.w + h*sized.w + w] = 1;
+        //         }
+        //     }
+        // }
+        // printf("The shape of input data is C x H x W : %d, %d, %d\n", sized.c, sized.h, sized.w);
+        // for(int c = 0; c < sized.c; c++){
+        //     for(int h = 0; h < sized.h; h++){
+        //         for(int w = 0; w < sized.w; w++){
+        //             printf("%.4f ", sized.data[c*sized.h*sized.w + h*sized.w + w]);
+        //             //sized.data[c*sized.h*sized.w + h*sized.w + w] = 1;
+        //         }
+        //     }
+        // }
         float *X = sized.data;
         clock_t time=clock();
         double start = MPI_Wtime();

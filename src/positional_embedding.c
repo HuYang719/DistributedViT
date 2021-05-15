@@ -20,7 +20,9 @@ layer make_positional_embedding_layer(int batch, int input_size, int model_dim)
 
     layer.output = (float*)xcalloc(batch*input_size * model_dim , sizeof(float));
     layer.weights = (float*)xcalloc(batch*input_size * model_dim , sizeof(float));
+    layer.class_token = (float*)xcalloc(1*1*model_dim, sizeof(float));
     memset(layer.weights, 0, batch*input_size*model_dim*sizeof(float));
+    memset(layer.class_token,0,1*1*model_dim*sizeof(float));
     layer.inputs = input_size;
     layer.outputs = layer.inputs;
     layer.out_c = layer.c = 576;
@@ -47,16 +49,37 @@ void forward_positional_embedding_layer(layer l, network_state state)
     // l.out_w = l.w = 64;
     // printf("positional_embedding, l.out_c=%d, l.c=%d, state.net.c=%d\n",  l.out_c, l.c, state.net.c);
     // printf("positional_embedding, state.input[0]= %f, state.input[12]=%f\n", state.input[0], state.input[12]);
+
+    // add class_token
+    for(int bi = 0; bi < batch; bi++) {
+        for(int ii = 0; ii < input_size; ii++) {
+            for(int di = 0; di < model_dim; di++) {
+                if(ii == 0)
+                    l.output[bi*input_size*model_dim + ii*model_dim + di] = 
+                    l.class_token[bi*input_size*model_dim + ii*model_dim + di];
+                else
+                    l.output[bi*input_size*model_dim + ii*model_dim + di] = 
+                    state.input[bi*(input_size-1)*model_dim + (ii-1)*model_dim + di];
+                
+            }
+        }
+    }
+
+
     
     for(int bi = 0; bi < batch; bi++) {
         for(int ii = 0; ii < input_size; ii++) {
             for(int di = 0; di < model_dim; di++) {
                 l.output[bi*input_size*model_dim + ii*model_dim + di] = 
-                state.input[bi*input_size*model_dim + ii*model_dim + di] + l.weights[bi*input_size*model_dim + ii*model_dim + di];
-                // printf("l.weight[%d][%d][%d] = %f\n", bi, ii, di, l.weights[bi*input_size*model_dim + ii*model_dim + di]);
+                l.output[bi*input_size*model_dim + ii*model_dim + di] + l.weights[bi*input_size*model_dim + ii*model_dim + di];
             }
         }
     }
+
+    // printf("after positional embedding\n");
+    // for(int i = 0; i < batch*input_size*model_dim; i++){
+    //     printf("%f ", l.output[i]);
+    // }
     
 }
 

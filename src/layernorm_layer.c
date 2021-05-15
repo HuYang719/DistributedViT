@@ -85,8 +85,6 @@ void forward_layernorm_layer(layer l, network_state state)
         add_biases(l.output, l.biases, l.batch, l.input_size, model_dim);  
     }
 
-    // printf("layer norm output is l.input[0]=%f, l.input[1]=%f\n", l.output[0], l.output[1]);
-
 #if OUTPUT
     char name[30] = "layernorm";
     output_printf_layer(1, 1, l.input_size, model_dim, l.output, name);
@@ -139,7 +137,7 @@ void layer_normalization(float *input, float *output, const float *mean, const f
         for(int ii = 0; ii < input_size; ii++) {
             for(int mi = 0; mi < model_dim; mi++) {
                 output[bi*input_size*model_dim + ii*model_dim + mi] = 
-                (input[bi*input_size*model_dim + ii*model_dim + mi] - mean[bi*input_size+ii])/sqrt(variance[bi*input_size+ii]+0.001);
+                (input[bi*input_size*model_dim + ii*model_dim + mi] - mean[bi*input_size+ii])/sqrt(variance[bi*input_size+ii]+0.000001);
 // #ifdef DEBUG
 //             printf("output[%d][%d][%d](%f) = input[%d][%d][%d](%f) - mean[]%d[%d](%f) / sqrt var[%d][%d](%f)\n",
 //             bi, ii, mi, output[bi*input_size*model_dim + ii*model_dim + mi],

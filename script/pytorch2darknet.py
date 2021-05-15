@@ -32,36 +32,41 @@ def save_vgg16_weights(model, filename):
     header.numpy().tofile(fp)
     for layer in model.features:
         if type(layer) == torch.nn.Conv2d:
-            print(layer)
+            # print(layer)
             save_conv(fp, layer)
     for layer in model.classifier:
         if type(layer) == torch.nn.Linear:
-            print(layer)
+            # print(layer)
             save_fc(fp, layer)
+
+def save_classtoken(fp, model):
+    model.class_token.data.numpy().tofile(fp)
+
 
 def save_posemb(fp, model):
     model.pos_embedding.data.numpy().tofile(fp)
-    # print(model.pos_embedding.data.numpy().shape)
+   
     # print(model.pos_embedding.data.numpy())
 
-def save_layernorm(fp, norm):
+def save_layernorm(fp, norm, index):
     norm.bias.data.numpy().tofile(fp)
     norm.weight.data.numpy().tofile(fp)
-    print("layer norm shape is {}, bias is {}".format( norm.bias.data.numpy().shape, norm.bias.data.numpy()))
-    print("layer norm shape is {}, weight is {}".format( norm.weight.data.numpy().shape, norm.weight.data.numpy()))
+    if(index == 0):
+        print("layer norm shape is {}, bias is {}".format( norm.bias.data.numpy().shape, norm.bias.data.numpy()))
+        print("layer norm shape is {}, weight is {}".format( norm.weight.data.numpy().shape, norm.weight.data.numpy()))
 
 def save_multihead(fp, attn, flag):
     # heads = [attn.proj_q, attn.proj_k, attn.proj_v]
     # for head in heads:
     #     save_fc(fp, head, 1)
-    save_fc(fp, attn.proj_q, flag)
-    save_fc(fp, attn.proj_k, flag)
+    save_fc(fp, attn.proj_q, 0)
+    save_fc(fp, attn.proj_k, 0)
     save_fc(fp, attn.proj_v, flag)
 
-def save_feedfwd(fp, pwff):
-    layers = [pwff.fc1, pwff.fc2]
-    for layer in layers:
-        save_fc(fp, layer, 0)
+def save_feedfwd(fp, pwff, id):
+    # layers = [pwff.fc1, pwff.fc2]
+    save_fc(fp, pwff.fc1, id)
+    save_fc(fp, pwff.fc2, 0)
 
 def save_transformer(module, fp):
     #parse wrap
@@ -75,8 +80,10 @@ def save_transformer(module, fp):
         #   (norm2) LayerNorm 2
         #   (pwff)  FeedForward: linear 1,2
         #   (drop)  Dropout
-        
-        save_layernorm(fp, module.norm1)
+        if(name == '0'):
+            save_layernorm(fp, module.norm1, 1)
+        else:
+            save_layernorm(fp, module.norm1, 1)
         if name == '0':
             save_multihead(fp, module.attn, 0)
         else:
@@ -84,9 +91,13 @@ def save_transformer(module, fp):
         if name == '0':
             save_fc(fp, module.proj, 0)
         else:
-            save_fc(fp, module.proj, 0)
-        save_layernorm(fp, module.norm2)
-        save_feedfwd(fp, module.pwff)
+            save_fc(fp, module.proj)
+        save_layernorm(fp, module.norm2, 1)
+        if name == '0':
+            save_feedfwd(fp, module.pwff, 1)
+        else:
+            save_feedfwd(fp, module.pwff, 0)
+            
 
 def save_vit_weights(model, filename):
     with open(filename, 'wb') as fp:
@@ -96,10 +107,12 @@ def save_vit_weights(model, filename):
         save_conv(fp, model.patch_embedding)
         #save positional embedding
         save_posemb(fp, model.positional_embedding)
+        #class token 
+        save_classtoken(fp, model)
         #save transformer
         save_transformer(model.transformer, fp)
-        save_layernorm(fp, model.norm)
-        save_fc(fp, model.fc, 1)
+        save_layernorm(fp, model.norm, 1)
+        save_fc(fp, model.fc)
 
 
 if __name__ == '__main__':
@@ -125,7 +138,7 @@ if __name__ == '__main__':
     elif model_name == 'vit':
         from pytorch_pretrained_vit import ViT
         vit = ViT('B_16_imagenet1k', pretrained=True)
-        file_name = 'vit.weights'
+        file_name = 'vit2.weights'
         if os.path.exists(file_name):
             os.remove(file_name)
         print('convert pytorch ViT to darknet, save ' + file_name)

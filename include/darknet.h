@@ -426,6 +426,8 @@ struct layer {
     float *biases_ema;
     float *scales_ema;
 
+    float *class_token;
+
     float *weights;
     float *weight_updates;
 
@@ -461,6 +463,7 @@ struct layer {
     float *col_image;
     float * delta;
     float * output;
+    float * output_t;
     float * activation_input;
     int delta_pinned;
     int output_pinned;

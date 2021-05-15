@@ -38,19 +38,22 @@ void forward_flatten_layer(layer l, network_state state)
     int gw = l.w;
     int gh = l.h;
     int batch = l.batch;
-    printf("flatten: gw=%d, gh=%d", l.w, l.h);
+    // printf("flatten: gw=%d, gh=%d", l.w, l.h);
 
     
     for(int bi = 0; bi < batch; bi++) {
         for(int mi = 0; mi < model_dim; mi++) {
             for(int hi = 0; hi < gh; hi++) {
-                for(int wi = 0; wi < gw; wi++)
-
-                l.output[bi*gh*gw*model_dim + hi*gw*model_dim + wi*model_dim +mi] = 
-                state.input[bi*model_dim*gw*gh + mi*gh*gw + hi*gw + wi];
+                for(int wi = 0; wi < gw; wi++){
+                    l.output[bi*gh*gw*model_dim + hi*gw*model_dim + wi*model_dim +mi] = state.input[bi*model_dim*gw*gh + mi*gh*gw + hi*gw + wi];
+                }
             }
         }
     }
+
+    // for(int i = 0; i < batch*gh*gw*model_dim;i++){
+    //     printf("%f ", l.output[i]);
+    // }
     
 }
 

@@ -1488,34 +1488,38 @@ image load_image_stb(char *filename, int channels)
 {
     int w, h, c;
     unsigned char *data = stbi_load(filename, &w, &h, &c, channels);
-    if (!data) {
-        char shrinked_filename[1024];
-        if (strlen(filename) >= 1024) sprintf(shrinked_filename, "name is too long");
-        else sprintf(shrinked_filename, "%s", filename);
-        fprintf(stderr, "Cannot load image \"%s\"\nSTB Reason: %s\n", shrinked_filename, stbi_failure_reason());
-        FILE* fw = fopen("bad.list", "a");
-        fwrite(shrinked_filename, sizeof(char), strlen(shrinked_filename), fw);
-        char *new_line = "\n";
-        fwrite(new_line, sizeof(char), strlen(new_line), fw);
-        fclose(fw);
-        if (check_mistakes) {
-            printf("\n Error in load_image_stb() \n");
-            getchar();
-        }
-        return make_image(10, 10, 3);
-        //exit(EXIT_FAILURE);
-    }
+    // if (!data) {
+    //     char shrinked_filename[1024];
+    //     if (strlen(filename) >= 1024) sprintf(shrinked_filename, "name is too long");
+    //     else sprintf(shrinked_filename, "%s", filename);
+    //     fprintf(stderr, "Cannot load image \"%s\"\nSTB Reason: %s\n", shrinked_filename, stbi_failure_reason());
+    //     FILE* fw = fopen("bad.list", "a");
+    //     fwrite(shrinked_filename, sizeof(char), strlen(shrinked_filename), fw);
+    //     char *new_line = "\n";
+    //     fwrite(new_line, sizeof(char), strlen(new_line), fw);
+    //     fclose(fw);
+    //     if (check_mistakes) {
+    //         printf("\n Error in load_image_stb() \n");
+    //         getchar();
+    //     }
+    //     return make_image(10, 10, 3);
+    //     //exit(EXIT_FAILURE);
+    // }
     if(channels) c = channels;
     int i,j,k;
     image im = make_image(w, h, c);
+    // printf("Original image input is, w %d, h %d, c%d \n", w, h, c);
     for(k = 0; k < c; ++k){
         for(j = 0; j < h; ++j){
             for(i = 0; i < w; ++i){
                 int dst_index = i + w*j + w*h*k;
                 int src_index = k + c*i + c*w*j;
                 im.data[dst_index] = (float)data[src_index]/255.;
+                // printf("%d ", data[src_index]);
             }
+            // printf("\n");
         }
+        // printf("\n\n");
     }
     free(data);
     return im;

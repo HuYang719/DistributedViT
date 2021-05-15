@@ -70,7 +70,10 @@ static inline float ramp_activate(float x){return x*(x>0)+.1f*x;}
 static inline float leaky_activate(float x){return (x>0) ? x : .1f*x;}
 //static inline float tanh_activate(float x){return (expf(2*x)-1)/(expf(2*x)+1);}
 static inline float tanh_activate(float x) { return (2 / (1 + expf(-2 * x)) - 1); }
-static inline float gelu_activate(float x) { return (0.5*x*(1 + tanhf(0.797885*x + 0.035677*powf(x, 3)))); }
+//  0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
+// static inline float gelu_activate(float x) { printf("1234124\n");return (0.5*x*(1 + tanhf(0.797885*x + 0.035677*powf(x, 3)))); }
+static inline float gelu_activate(float x) { return (0.5 * x * (1 + tanh(sqrt(2/M_PI) * (x + 0.044715 * powf(x, 3))))); }
+
 static inline float softplus_activate(float x, float threshold) {
     if (x > threshold) return x;                // too large
     else if (x < -threshold) return expf(x);    // too small
