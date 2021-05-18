@@ -207,6 +207,28 @@ void forward_connected_layer(connected_layer l, network_state state)
     activate_array(l.output, l.outputs*l.batch, l.activation);
 }
 
+
+
+oid forward_connected_layer_gpu(layer l, network net)
+{
+    fill_gpu(l.outputs*l.batch, 0, l.output_gpu, 1);
+
+    int m = l.batch;
+    int k = l.inputs;
+    int n = l.outputs;
+    float * a = net.input_gpu;
+    float * b = l.weights_gpu;
+    float * c = l.output_gpu;
+    gemm_gpu(0,1,m,n,k,1,a,k,b,k,1,c,n);
+
+    if (l.batch_normalize) {
+        forward_batchnorm_layer_gpu(l, net);
+    } else {
+        add_bias_gpu(l.output_gpu, l.biases_gpu, l.batch, l.outputs, 1);
+    }
+    activate_array_gpu(l.output_gpu, l.outputs*l.batch, l.activation);
+}
+
 void backward_connected_layer(connected_layer l, network_state state)
 {
     int i;

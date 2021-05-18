@@ -3,7 +3,7 @@
 #include "utils.h"
 #include "blas.h"
 #include "gemm.h"
-
+#include <time.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,15 +131,24 @@ MPI_Allgatherv(output_temp, recvcounts_o[world_rank], MPI_FLOAT,l.output, recvco
     float *b = l.weights;
     float *c = l.output;
 
+
+    struct timespec start, end, m1, m2, m3, m4, m5,m6, mt;
+    if( clock_gettime(CLOCK_REALTIME, &start) == -1) {perror("clock unable gettune");}
     for(i = 0; i < l.batch; i++) {
         gemm(0,1,m,n,k,1,a,k,b,k,1,c + i*l.outputs,n);
     }
- 
+     if( clock_gettime(CLOCK_REALTIME, &m1) == -1) {perror("clock unable gettune");}
+    double time1 = (m1.tv_sec - start.tv_sec) + (double)(m1.tv_nsec - start.tv_nsec)/1e9;
+    printf("\n Mattrrix sec is %f, hidden size is %d \n", time1, l.hidden);
 
     // printf("mlp output[%d] = %f\n", 2, l.output[2]);
     for(i = 0; i < l.batch*m; ++i){
         axpy_cpu(n, 1, l.biases, 1, l.output + i*n, 1);
     }
+      if( clock_gettime(CLOCK_REALTIME, &m2) == -1) {perror("clock unable gettune");}
+    double time2 = (m2.tv_sec - m1.tv_sec) + (double)(m2.tv_nsec - m1.tv_nsec)/1e9;
+    printf("\n Mattrrix sec is %f, hidden size is %d \n", time2, l.hidden);
+
 
 
     // if(l.scale > 0 && l.scale < 1) {
